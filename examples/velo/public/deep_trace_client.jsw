@@ -1,0 +1,248 @@
+/**
+ * DEEP-TRACE Velo Backend Module
+ * ==============================
+ *
+ * Drop this file into your Wix site's Public & Backend code editor at:
+ *   /public/backend/deep_trace_client.jsw
+ *
+ * Then expose the functions you want to use on the page to the
+ * site's page code (right-click the function > "Expose to Page").
+ *
+ * Required Wix page elements:
+ *   - #imageUploader    File Upload element
+ *   - #btnEmbed         Button element (triggers embed)
+ *   - #btnExtract       Button element (optional, triggers extract)
+ *   - #txtStatus        Text element (for feedback)
+ *   - #imgResult        Image element (to display the watermarked output)
+ *   - #txtAssetId       Text element (to display the returned asset_id)
+ *
+ * Configuration:
+ *   1. Replace DEEPTRACE_API_BASE_URL with your deployed API URL.
+ *   2. Add a Wix Secret named "DEEPTRACE_API_KEY" with your service key.
+ *   3. In the Velo Secrets panel, mark the secret as backend-only.
+ */
+
+import { fetch } from 'wix-fetch';
+import wixSecrets from 'wix-secrets';
+import wixUsers from 'wix-users';
+
+// --- Configuration -----------------------------------------------------------
+
+// Replace with your deployed API host, e.g. https://deep-trace-api.onrender.com
+// (do NOT include a trailing slash)
+const DEEPTRACE_API_BASE_URL = "https://your-deeptrace-api.onrender.com";
+
+// Read once at module load and cache
+let _apiKeyPromise = null;
+async function getApiKey() {
+    if (!_apiKeyPromise) {
+        _apiKeyPromise = wixSecrets.getSecret("DEEPTRACE_API_KEY");
+    }
+    return _apiKeyPromise;
+}
+
+// Default timeout for the FastAPI server (seconds)
+const REQUEST_TIMEOUT_SECONDS = 60;
+
+// --- Public API (expose these to the page) ---------------------------------
+
+/**
+ * Embed a watermark in an image.
+ *
+ * @param {string} fileUrl        - The Wix-hosted fileUrl of the image to embed.
+ * @param {string} originalName   - The original filename (used for the ledger).
+ * @param {string} [accountId]    - Optional override; defaults to current Wix user id.
+ * @returns {Promise<Object>}     - The full embed response from the API.
+ * @throws {Error}                 - On any failure (network, server, validation).
+ */
+export async function embedWatermark(fileUrl, originalName, accountId) {
+    if (!fileUrl) throw new Error("embedWatermark: fileUrl is required");
+    if (!originalName) originalName = "asset.png";
+
+    const apiKey = await getApiKey();
+    const currentUser = (wixUsers.currentUser.loggedIn && wixUsers.currentUser.id)
+        || "anonymous_wix_user";
+
+    // 1. Pull the raw image bytes from Wix
+    const imageResponse = await fetch(fileUrl);
+    if (!imageResponse.ok) {
+        throw new Error(`Failed to fetch image: HTTP ${imageResponse.status}`);
+    }
+    const imageBlob = await imageResponse.blob();
+
+    // 2. Build the multipart form
+    const formData = new FormData();
+    formData.append("account_id", accountId || currentUser);
+    formData.append("device_sig", "wix_velo_client_v1");
+    formData.append("file", imageBlob, originalName);
+
+    // 3. POST to the embed endpoint
+    const url = `${DEEPTRACE_API_BASE_URL}/api/v1/watermark/embed`;
+    const response = await fetch(url, {
+        method: "POST",
+        headers: {
+            "X-API-Key": apiKey,
+            "Accept": "application/json"
+        },
+        body: formData,
+        timeout: REQUEST_TIMEOUT_SECONDS * 1000
+    });
+
+    if (!response.ok) {
+        const errPayload = await response.json().catch(() => ({}));
+        const detail = errPayload.detail || errPayload.error?.message || response.statusText;
+        throw new Error(`[HTTP ${response.status}] ${detail}`);
+    }
+
+    return await response.json();
+}
+
+
+/**
+ * Extract a watermark from an image and look it up in the ledger.
+ *
+ * @param {string} fileUrl        - The Wix-hosted fileUrl of the suspect image.
+ * @param {string} [accountId]    - Optional filter to scope the search.
+ * @returns {Promise<Object>}     - The full extract response.
+ * @throws {Error}                 - On any failure.
+ */
+export async function extractWatermark(fileUrl, accountId) {
+    if (!fileUrl) throw new Error("extractWatermark: fileUrl is required");
+
+    const apiKey = await getApiKey();
+
+    const imageResponse = await fetch(fileUrl);
+    if (!imageResponse.ok) {
+        throw new Error(`Failed to fetch image: HTTP ${imageResponse.status}`);
+    }
+    const imageBlob = await imageResponse.blob();
+
+    const formData = new FormData();
+    formData.append("file", imageBlob, "suspect.png");
+    if (accountId) formData.append("account_id", accountId);
+
+    const url = `${DEEPTRACE_API_BASE_URL}/api/v1/forensics/extract`;
+    const response = await fetch(url, {
+        method: "POST",
+        headers: {
+            "X-API-Key": apiKey,
+            "Accept": "application/json"
+        },
+        body: formData,
+        timeout: REQUEST_TIMEOUT_SECONDS * 1000
+    });
+
+    if (!response.ok) {
+        const errPayload = await response.json().catch(() => ({}));
+        const detail = errPayload.detail || errPayload.error?.message || response.statusText;
+        throw new Error(`[HTTP ${response.status}] ${detail}`);
+    }
+
+    return await response.json();
+}
+
+
+/**
+ * Fetch public asset metadata by asset_id. No API key required.
+ *
+ * @param {string} assetId        - The asset UUID.
+ * @returns {Promise<Object>}     - Public asset metadata.
+ * @throws {Error}                 - On 404 or network failure.
+ */
+export async function getPublicAsset(assetId) {
+    if (!assetId) throw new Error("getPublicAsset: assetId is required");
+
+    const url = `${DEEPTRACE_API_BASE_URL}/api/v1/asset/${assetId}`;
+    const response = await fetch(url, { method: "GET" });
+
+    if (!response.ok) {
+        throw new Error(`[HTTP ${response.status}] asset not found`);
+    }
+    return await response.json();
+}
+
+
+/**
+ * Download the watermarked image as a Blob. No API key required.
+ *
+ * @param {string} assetId        - The asset UUID.
+ * @returns {Promise<Blob>}       - The PNG bytes.
+ * @throws {Error}                 - On 404 or network failure.
+ */
+export async function getWatermarkedImage(assetId) {
+    if (!assetId) throw new Error("getWatermarkedImage: assetId is required");
+
+    const url = `${DEEPTRACE_API_BASE_URL}/api/v1/asset/${assetId}/image`;
+    const response = await fetch(url, { method: "GET" });
+
+    if (!response.ok) {
+        throw new Error(`[HTTP ${response.status}] watermarked image not available`);
+    }
+    return await response.blob();
+}
+
+
+/**
+ * Issue an HMAC challenge for a given account (for sensitive endpoints).
+ *
+ * @param {string} accountId      - The account to issue a challenge for.
+ * @returns {Promise<Object>}     - Challenge token + metadata.
+ */
+export async function issueChallenge(accountId) {
+    const apiKey = await getApiKey();
+    const url = `${DEEPTRACE_API_BASE_URL}/api/v1/auth/challenge`;
+    const response = await fetch(url, {
+        method: "POST",
+        headers: {
+            "X-API-Key": apiKey,
+            "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ account_id: accountId })
+    });
+    if (!response.ok) {
+        throw new Error(`[HTTP ${response.status}] challenge failed`);
+    }
+    return await response.json();
+}
+
+
+/**
+ * Verify a suspect image against a known asset_id. Requires a fresh
+ * X-Challenge token via issueChallenge().
+ *
+ * @param {string} fileUrl        - The Wix-hosted fileUrl of the suspect image.
+ * @param {string} assetId        - The asset UUID to verify against.
+ * @param {string} challengeToken - The token from issueChallenge().
+ * @returns {Promise<Object>}     - { verified, payload_match, perceptual_distance }
+ */
+export async function verifyAgainstAsset(fileUrl, assetId, challengeToken) {
+    if (!fileUrl) throw new Error("verifyAgainstAsset: fileUrl is required");
+    if (!assetId) throw new Error("verifyAgainstAsset: assetId is required");
+    if (!challengeToken) throw new Error("verifyAgainstAsset: challengeToken is required");
+
+    const apiKey = await getApiKey();
+    const imageResponse = await fetch(fileUrl);
+    const imageBlob = await imageResponse.blob();
+
+    const formData = new FormData();
+    formData.append("file", imageBlob, "verify.png");
+
+    const url = `${DEEPTRACE_API_BASE_URL}/api/v1/forensics/verify/${assetId}`;
+    const response = await fetch(url, {
+        method: "POST",
+        headers: {
+            "X-API-Key": apiKey,
+            "X-Challenge": challengeToken,
+            "Accept": "application/json"
+        },
+        body: formData,
+        timeout: REQUEST_TIMEOUT_SECONDS * 1000
+    });
+
+    if (!response.ok) {
+        const errPayload = await response.json().catch(() => ({}));
+        const detail = errPayload.detail || response.statusText;
+        throw new Error(`[HTTP ${response.status}] ${detail}`);
+    }
+    return await response.json();
+}

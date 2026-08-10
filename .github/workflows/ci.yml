@@ -1,0 +1,118 @@
+name: ci
+
+on:
+  push:
+    branches: [main, staging, develop]
+  pull_request:
+    branches: [main, staging, develop]
+
+jobs:
+  test:
+    name: unit + integration
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: deeptrace_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/deeptrace_test
+      SECRET_KEY: ci_test_secret_key_32_bytes_min!
+      API_KEYS: ci_api_key,ci_api_key_ledger,ci_api_key_public,ci_api_key_fuzzy,ci_api_key_search,ci_api_key_public_asset,ci_api_key_rate_limit
+      ENVIRONMENT: test
+      RATE_LIMIT_EMBED: "10000/minute"
+      RATE_LIMIT_PUBLIC: "10000/minute"
+      RATE_LIMIT_AUTHED: "10000/minute"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install aiosqlite
+
+      - name: Lint with ruff
+        run: |
+          pip install ruff black
+          ruff check app tests
+          black --check app tests
+        continue-on-error: true
+
+      - name: Verify engine self-test (no DB)
+        run: python scripts/verify_installation.py
+
+      - name: Run unit tests
+        run: pytest tests/unit/ -v
+
+      - name: Run integration tests
+        run: pytest tests/integration/ -v
+
+      - name: Build Docker image
+        run: docker build -t deep-trace:test .
+
+  security:
+    name: dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install pip-audit
+        run: pip install pip-audit
+      - name: Audit dependencies
+        run: pip-audit -r requirements.txt
+        continue-on-error: true
+
+  # ---- Auto-deploy to Render on push to main / staging ----
+  #
+  # Requires a Render API key stored as the GitHub Actions secret
+  # `RENDER_DEPLOY_HOOK_URL` (a deploy hook URL created in the Render
+  # dashboard for each service).
+  deploy:
+    name: trigger Render deploy
+    runs-on: ubuntu-latest
+    needs: [test, security]
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')
+    steps:
+      - name: Trigger Render deploy hook (main)
+        if: github.ref == 'refs/heads/main'
+        run: |
+          if [ -z "${{ secrets.RENDER_DEPLOY_HOOK_URL }}" ]; then
+            echo "::warning::RENDER_DEPLOY_HOOK_URL not set; skipping deploy trigger"
+            exit 0
+          fi
+          curl -fsS -X POST "${{ secrets.RENDER_DEPLOY_HOOK_URL }}"
+          echo "Triggered Render deploy from main."
+
+      - name: Trigger Render deploy hook (staging)
+        if: github.ref == 'refs/heads/staging'
+        run: |
+          if [ -z "${{ secrets.RENDER_DEPLOY_HOOK_STAGING_URL }}" ]; then
+            echo "::warning::RENDER_DEPLOY_HOOK_STAGING_URL not set; skipping deploy trigger"
+            exit 0
+          fi
+          curl -fsS -X POST "${{ secrets.RENDER_DEPLOY_HOOK_STAGING_URL }}"
+          echo "Triggered Render deploy from staging."

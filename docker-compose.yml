@@ -1,0 +1,72 @@
+# DEEP-TRACE Engine — local development stack
+#
+# Brings up: Postgres 16 + the API service, with healthchecks, a named
+# volume for DB persistence, and bridge networking. In production you
+# would add a reverse proxy (Traefik / Caddy / nginx) and externalise
+# secrets via Vault / SOPS / sealed-secrets.
+
+name: deep-trace
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: deep-trace-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-deeptrace}
+    volumes:
+      - deeptrace_db_data:/var/lib/postgresql/data
+      - ./schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-deeptrace}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    ports:
+      - "5432:5432"
+    networks:
+      - deeptrace_net
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: deep-trace-api
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      SECRET_KEY: ${DEEPTRACE_SECRET_KEY:-dev_only_change_me_in_production_32b!}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-deeptrace}
+      API_KEYS: ${DEEPTRACE_API_KEYS:-dev_api_key_change_me_in_production}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_JSON: ${LOG_JSON:-false}
+      CORS_ALLOW_ORIGINS: ${CORS_ALLOW_ORIGINS:-*}
+      WATERMARK_QIM_DELTA: ${WATERMARK_QIM_DELTA:-20.0}
+      WATERMARK_ECC_SYMBOLS: ${WATERMARK_ECC_SYMBOLS:-32}
+    volumes:
+      - ./manifests:/app/manifests  # C2PA manifest output directory
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    networks:
+      - deeptrace_net
+
+volumes:
+  deeptrace_db_data:
+    name: deeptrace_db_data
+
+networks:
+  deeptrace_net:
+    name: deeptrace_net
+    driver: bridge

@@ -1,0 +1,70 @@
+# DEEP-TRACE — Render Blueprint
+# ============================
+#
+# One-click deploy: create a new Render Blueprint instance and point
+# it at this repo. Render will create the Postgres DB + the API
+# service and wire them together.
+#
+# Reference: https://render.com/docs/blueprint-spec
+
+services:
+  # ---- PostgreSQL ----
+  - type: pserv
+    name: deep-trace-db
+    plan: starter               # $7/mo, 1GB RAM, 10GB storage; bump to standard for prod
+    region: oregon              # change to your preferred region
+    ipAllowList: []              # only set if you have static egress IPs
+    envVars:
+      - key: POSTGRES_USER
+        value: postgres
+      - key: POSTGRES_PASSWORD
+        generateValue: true       # Render generates a strong random password
+      - key: POSTGRES_DB
+        value: deeptrace
+    backupRetention:
+      frequency: daily
+      count: 7                   # keep 7 daily backups
+
+  # ---- FastAPI service ----
+  - type: web
+    name: deep-trace-api
+    runtime: python
+    plan: starter                # $7/mo, 512MB RAM, 0.5 CPU; bump for prod
+    region: oregon
+    branch: main                 # deploy from main; staging branch = separate service
+    buildCommand: "pip install --upgrade pip && pip install --no-cache-dir -r requirements.txt"
+    startCommand: "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 2 --proxy-headers"
+    healthCheckPath: /health
+    autoDeploy: true             # auto-deploy on push to main
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.10"          # Pin to a specific Python version
+      - key: ENVIRONMENT
+        value: production
+      - key: SECRET_KEY
+        generateValue: true       # Render generates this; 32-byte hex
+      - key: API_KEYS
+        sync: false               # set manually in the Render dashboard
+      - key: DATABASE_URL
+        fromService:
+          type: pserv
+          name: deep-trace-db
+          property: connectionString
+      - key: LOG_LEVEL
+        value: INFO
+      - key: LOG_JSON
+        value: "true"
+      - key: CORS_ALLOW_ORIGINS
+        value: "https://yoursite.wixsite.com,https://www.yourcustomdomain.com"
+      - key: WATERMARK_QIM_DELTA
+        value: "20.0"
+      - key: WATERMARK_ECC_SYMBOLS
+        value: "32"
+      - key: FORENSIC_DEFAULT_MAX_DISTANCE
+        value: "10"
+      - key: RATE_LIMIT_EMBED
+        value: "10/minute"
+      - key: RATE_LIMIT_PUBLIC
+        value: "60/minute"
+      - key: RATE_LIMIT_AUTHED
+        value: "600/minute"
