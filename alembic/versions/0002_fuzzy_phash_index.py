@@ -24,9 +24,9 @@ def upgrade() -> None:
     op.execute('CREATE EXTENSION IF NOT EXISTS "pg_trgm"')
 
     # SQL function for exact bit-level Hamming distance on hex strings.
-    # The original implementation used Postgres' deprecated bytea `#` XOR operator
-    # (removed in PG 14 for security). We now cast hex to bit varying and use
-    # the still-supported `bit varying # bit varying` operator + `bit_count()`.
+    # The original implementation used Postgres' deprecated bytea `#` XOR
+    # operator (removed in PG 14 for security). We now XOR per-byte integers
+    # via get_byte() — `integer # integer` is plain bitwise XOR, fully supported.
     op.execute(
         """
         CREATE OR REPLACE FUNCTION hamming_hex(a text, b text)
@@ -40,10 +40,15 @@ def upgrade() -> None:
                      AND length(a) % 2 = 0
                      AND a ~ '^[0-9a-fA-F]+$'
                      AND b ~ '^[0-9a-fA-F]+$'
-                THEN bit_count(
-                    (decode(a, 'hex')::bit varying)
-                        # (decode(b, 'hex')::bit varying)
-                )::int
+                THEN (
+                    SELECT sum((
+                        (get_byte(decode(a, 'hex'), i)
+                            # get_byte(decode(b, 'hex'), i)
+                        ) >> k
+                    ) & 1)::int
+                    FROM generate_series(0, length(a)/2 - 1) AS i,
+                         generate_series(0, 7) AS k
+                )
                 ELSE 0
             END;
         $func$;
