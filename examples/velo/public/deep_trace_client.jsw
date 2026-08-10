@@ -30,7 +30,7 @@ import wixUsers from 'wix-users';
 
 // Replace with your deployed API host, e.g. https://deep-trace-api.onrender.com
 // (do NOT include a trailing slash)
-const DEEPTRACE_API_BASE_URL = "https://your-deeptrace-api.onrender.com";
+const DEEPTRACE_API_BASE_URL = "https://deep-trace-api-ogi4.onrender.com";
 
 // Read once at module load and cache
 let _apiKeyPromise = null;
@@ -73,8 +73,9 @@ export async function embedWatermark(fileUrl, originalName, accountId) {
     // 2. Build the multipart form
     const formData = new FormData();
     formData.append("account_id", accountId || currentUser);
-    formData.append("device_sig", "wix_velo_client_v1");
+    formData.append("device_signature", "wix_velo_client_v1");
     formData.append("file", imageBlob, originalName);
+    formData.append("original_filename", originalName);
 
     // 3. POST to the embed endpoint
     const url = `${DEEPTRACE_API_BASE_URL}/api/v1/watermark/embed`;
