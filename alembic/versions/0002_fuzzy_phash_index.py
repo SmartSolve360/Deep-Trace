@@ -23,7 +23,10 @@ def upgrade() -> None:
     # Trigram operator class (no-op if already installed)
     op.execute('CREATE EXTENSION IF NOT EXISTS "pg_trgm"')
 
-    # SQL function for exact bit-level Hamming distance on hex strings
+    # SQL function for exact bit-level Hamming distance on hex strings.
+    # The original implementation used Postgres' deprecated bytea `#` XOR operator
+    # (removed in PG 14 for security). We now cast hex to bit varying and use
+    # the still-supported `bit varying # bit varying` operator + `bit_count()`.
     op.execute(
         """
         CREATE OR REPLACE FUNCTION hamming_hex(a text, b text)
@@ -32,18 +35,17 @@ def upgrade() -> None:
         IMMUTABLE
         PARALLEL SAFE
         AS $func$
-            SELECT COALESCE((
-                SELECT sum(((get_byte(xor_bytes, i) >> k) & 1)::int)
-                FROM generate_series(0, length(a)/2 - 1) AS i,
-                     generate_series(0, 7) AS k
-            ), 0)
-            FROM (
-                SELECT decode(a, 'hex') # decode(b, 'hex') AS xor_bytes
-            ) AS t
-            WHERE length(a) = length(b)
-              AND length(a) % 2 = 0
-              AND a ~ '^[0-9a-fA-F]+$'
-              AND b ~ '^[0-9a-fA-F]+$';
+            SELECT CASE
+                WHEN length(a) = length(b)
+                     AND length(a) % 2 = 0
+                     AND a ~ '^[0-9a-fA-F]+$'
+                     AND b ~ '^[0-9a-fA-F]+$'
+                THEN bit_count(
+                    (decode(a, 'hex')::bit varying)
+                        # (decode(b, 'hex')::bit varying)
+                )::int
+                ELSE 0
+            END;
         $func$;
         """
     )
