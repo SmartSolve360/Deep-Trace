@@ -5,7 +5,7 @@ python-multipart==0.0.9
 
 # Settings & validation
 pydantic==2.7.4
-pydantic-settings==2.4.0
+pydantic-settings==2.7.0
 
 # Database (async)
 sqlalchemy[asyncio]==2.0.28
