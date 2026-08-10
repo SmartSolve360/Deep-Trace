@@ -11,9 +11,9 @@ services:
   # ---- PostgreSQL ----
   - type: pserv
     name: deep-trace-db
-    plan: starter               # $7/mo, 1GB RAM, 10GB storage; bump to standard for prod
+    plan: basic-1gb             # $7/mo, 1GB RAM, 10GB storage; bump to standard for prod
     region: oregon              # change to your preferred region
-    ipAllowList: []              # only set if you have static egress IPs
+    # ipAllowList: omit unless you have static egress IPs
     envVars:
       - key: POSTGRES_USER
         value: postgres
