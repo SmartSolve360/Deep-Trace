@@ -23,9 +23,11 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column(
-        "asset_provenance_ledger",
-        sa.Column("watermarked_image", sa.LargeBinary(), nullable=True),
+    # Use raw SQL with IF NOT EXISTS so this migration is idempotent
+    # (safe to re-run if a previous deploy partially applied it).
+    op.execute(
+        "ALTER TABLE asset_provenance_ledger "
+        "ADD COLUMN IF NOT EXISTS watermarked_image BYTEA"
     )
 
 
