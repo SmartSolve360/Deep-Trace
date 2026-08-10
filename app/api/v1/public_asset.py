@@ -11,8 +11,6 @@ GET /api/v1/asset/{asset_id}/image    watermarked PNG (binary)
 GET /api/v1/asset/{asset_id}/thumb    128x128 perceptual thumbnail (PNG)
 """
 
-from __future__ import annotations
-
 import io
 import uuid
 

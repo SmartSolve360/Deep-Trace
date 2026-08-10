@@ -12,8 +12,6 @@ POST /api/v1/forensics/verify
     header (replay-protected) tied to the account.
 """
 
-from __future__ import annotations
-
 from typing import Optional
 
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, UploadFile, status
