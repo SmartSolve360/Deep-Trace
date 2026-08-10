@@ -4,8 +4,8 @@ uvicorn[standard]==0.28.0
 python-multipart==0.0.9
 
 # Settings & validation
-pydantic==2.6.4
-pydantic-settings==2.2.1
+pydantic==2.7.4
+pydantic-settings==2.4.0
 
 # Database (async)
 sqlalchemy[asyncio]==2.0.28
