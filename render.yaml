@@ -21,9 +21,6 @@ services:
         generateValue: true       # Render generates a strong random password
       - key: POSTGRES_DB
         value: deeptrace
-    backupRetention:
-      frequency: daily
-      count: 7                   # keep 7 daily backups
 
   # ---- FastAPI service ----
   - type: web
