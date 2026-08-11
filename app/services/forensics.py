@@ -91,7 +91,9 @@ class ForensicsService:
         watermarked image encoded as PNG bytes.
         """
         ts = timestamp or now_ts()
-        ts_dt = datetime.fromtimestamp(ts, tz=timezone.utc)
+        # Postgres column is TIMESTAMP WITHOUT TIME ZONE; pass naive datetime
+        # (asyncpg refuses to mix offset-naive and offset-aware datetimes).
+        ts_dt = datetime.fromtimestamp(ts)
 
         # 1. Decode + validate the input image
         image_bgr = decode_image(image_bytes)
